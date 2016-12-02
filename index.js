@@ -26,7 +26,7 @@ module.exports = function requireDir (options, cb) {
     if (typeof options === 'string') {
         opts = { dirPath: options }
     }
-    opts = { ...DEFAULT_OPTIONS, ...opts }
+    opts = _.assign({}, DEFAULT_OPTIONS, opts)
     const hasCallback = cb && _.isFunction(cb)
     try {
         validateOptions(opts)
