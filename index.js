@@ -9,9 +9,6 @@ const fs = require('fs')
 const _ = require('lodash')
 const Promise = require('bluebird')
 
-const readStats = Promise.promisify(fs.stat)
-const readDir = Promise.promisify(fs.readdir)
-
 const DEFAULT_OPTIONS = {
     depth: 10,
     filter: /(.+)$/,
@@ -22,10 +19,11 @@ const DEFAULT_OPTIONS = {
 }
 
 module.exports = function requireDir (options, cb) {
-    let opts = options
-    if (typeof options === 'string') {
-        opts = { dirPath: options }
+    let args = [ ...arguments ]
+    if (args.length === 0 || _.isEmpty(options)) {
+        return Promise.reject(new Error('At least provide directory path'))
     }
+    let opts = _.isString(options) ? { dirPath: options } : options
     opts = _.assign({}, DEFAULT_OPTIONS, opts)
     const hasCallback = cb && _.isFunction(cb)
     try {
@@ -48,18 +46,19 @@ module.exports = function requireDir (options, cb) {
      * @returns {Promise|Promise.<Object>|*}
      */
     function _walk (dirPath, currentDepth) {
-
-        return readStats(dirPath).then(stats => {
+        let readStat = Promise.promisify(fs.stat)
+        return readStat(dirPath).then(stats => {
             if (stats.isFile()) {
                 let file = opts.execute ? require(dirPath) : dirPath
                 return Promise.resolve(file)
             }
             if (stats.isDirectory()) {
                 currentDepth += 1
-                const filesStats = readDir(dirPath).then(files => {
+                let readDirP = Promise.promisify(fs.readdir)
+                const filesStats = readDirP(dirPath).then(files => {
                     let props = {}
                     _.forEach(files, file => {
-                        props[ file ] = readStats(path.resolve(dirPath, file))
+                        props[ file ] = Promise.promisify(fs.stat)(path.resolve(dirPath, file))
                     })
                     return Promise.props(props)
                 })
@@ -69,8 +68,14 @@ module.exports = function requireDir (options, cb) {
                         let canPass = false
                         let name = opts.camelcase ? toCamelCase(file) : file
                         if (stats.isFile()) {
+                            let ext = path.extname(file)
                             canPass = opts.filter.test(file)
-                            name = opts.filenameReplacer(file)
+                            // 如果是可执行文件,只对js和json文件起作用
+                            if (opts.execute && !canExecute(ext)) {
+                                return
+                            }
+                            // 文件替换名字前先去掉拓展名
+                            name = opts.filenameReplacer(name.replace(ext, ''))
                         } else if (stats.isDirectory() && currentDepth < opts.depth) {
                             canPass = !opts.excludeDirs.test(file)
                         }
@@ -106,4 +111,8 @@ function validateOptions ({ dirPath, filter, excludeDirs, depth, filenameReplace
 
 function toCamelCase (str) {
     return str.replace(/[_-][a-z]/ig, s => s.substring(1).toUpperCase())
+}
+
+function canExecute (ext) {
+    return ext === '.js' || ext === '.json'
 }
